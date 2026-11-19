@@ -114,6 +114,7 @@ export function parseValueRanking(
   json: unknown,
   plan: ValueRankingPlan = "go",
   nowMs: number = Date.now(),
+  limit: number = VALUE_RANKING_LIMIT,
 ): ValueRanking | undefined {
   const data = asRecord(json)?.data;
   if (!Array.isArray(data)) return undefined;
@@ -131,7 +132,7 @@ export function parseValueRanking(
       a.outputPercent - b.outputPercent ||
       a.name.localeCompare(b.name),
   );
-  return { plan, generatedAtMs: nowMs, models: models.slice(0, VALUE_RANKING_LIMIT) };
+  return { plan, generatedAtMs: nowMs, models: models.slice(0, limit) };
 }
 
 /** The Go model list's ranking for `plan`; throws when the list cannot be read. */
@@ -140,9 +141,11 @@ export async function fetchValueRanking(
     plan?: ValueRankingPlan;
     signal?: AbortSignal;
     timeoutMs?: number;
+    /** How many ranked models to keep; the Value tab asks for them all. */
+    limit?: number;
   } = {},
 ): Promise<ValueRanking> {
-  const { plan = "go", signal, timeoutMs = 10_000 } = options;
+  const { plan = "go", signal, timeoutMs = 10_000, limit = VALUE_RANKING_LIMIT } = options;
   const controller = new AbortController();
   const abort = () => controller.abort();
   if (signal?.aborted) controller.abort();
@@ -155,7 +158,7 @@ export async function fetchValueRanking(
       signal: controller.signal,
     });
     if (!response.ok) throw new Error(`Go model list error ${response.status}`);
-    const ranking = parseValueRanking(await response.json(), plan);
+    const ranking = parseValueRanking(await response.json(), plan, Date.now(), limit);
     if (!ranking) throw new Error("Go model list has no priced models");
     return ranking;
   } finally {
@@ -243,5 +246,108 @@ export function valueRankingLines(ranking: ValueRanking | undefined, width: numb
     };
     lines.push(clipLine(line, width));
   });
+  return lines;
+}
+
+/** A monthly limit in USD, without trailing zeros ("$60", "$2.5"). */
+function formatLimitUsd(value: number): string {
+  if (!Number.isFinite(value) || value <= 0) return "$?";
+  return `$${String(Math.round(value * 100) / 100)}`;
+}
+
+/**
+ * The Value tab's table: every ranked model with its blended percentage and its monthly limit
+ * in USD, so a shrinking balance can be read against what each model allows. Same order and
+ * numbers as the sidebar section; the header names the columns and the last line explains the
+ * `*` and the units. `nowMs` dates the "updated" line; without a ranking there is nothing.
+ */
+export function valueRankingTableLines(
+  ranking: ValueRanking | undefined,
+  width: number,
+  nowMs: number = Date.now(),
+): Line[] {
+  if (!ranking || ranking.models.length === 0 || width <= 0) return [];
+
+  const models = ranking.models;
+  const blendTexts = models.map(
+    (model) => `${formatPercent(model.blendPercent)}${model.variablePricing ? "*" : ""}`,
+  );
+  const inputTexts = models.map((model) => formatPercent(model.inputPercent));
+  const outputTexts = models.map((model) => formatPercent(model.outputPercent));
+  const cacheTexts = models.map((model) => formatCachePercent(model.cachePercent));
+  const limitTexts = models.map((model) => formatLimitUsd(model.monthlyLimitUsd));
+
+  const valuesFor = (index: number, withCache: boolean): string => {
+    const cache = withCache ? ` c${cacheTexts[index]}` : "";
+    return `v${blendTexts[index]} i${inputTexts[index]} o${outputTexts[index]}${cache} ${limitTexts[index]}`;
+  };
+
+  const withCacheWidth = Math.max(...models.map((_, index) => valuesFor(index, true).length));
+  // The rank is two digits and a space; the rest is the name and the values. The cache column
+  // only shows when the name keeps enough room to be recognized.
+  const roomWithCache = width - 3 - withCacheWidth;
+  const showCache = roomWithCache >= 16;
+  const valuesWidth = showCache
+    ? withCacheWidth
+    : Math.max(...models.map((_, index) => valuesFor(index, false).length));
+  const modelWidth = Math.max(8, Math.min(32, width - 3 - valuesWidth));
+
+  const ageMin = Math.max(0, Math.floor((nowMs - ranking.generatedAtMs) / 60_000));
+  const updated = ageMin < 1 ? "updated just now" : `updated ${ageMin} min ago`;
+  const lines: Line[] = [
+    clipLine(
+      {
+        id: "value_ranking",
+        segments: [
+          {
+            text: `Best value · ${PLAN_LABELS[ranking.plan]} — v %/1M blended (75% in + 25% out), lowest first`,
+            role: "provider",
+            bold: true,
+          },
+        ],
+      },
+      width,
+    ),
+    clipLine(
+      {
+        id: "value_ranking_updated",
+        segments: [
+          {
+            text: `#  Model v i o${showCache ? " c" : ""} limit · ${updated} · refreshes every 15 min`,
+            role: "value",
+          },
+        ],
+      },
+      width,
+    ),
+  ];
+
+  models.forEach((model, index) => {
+    const rank = `${String(index + 1).padStart(2)} `;
+    const line: Line = {
+      id: `value.${model.modelID}`,
+      segments: [
+        { text: rank, role: "value" },
+        { text: fit(model.name, modelWidth), role: "label" },
+        { text: valuesFor(index, showCache), role: "value" },
+      ],
+    };
+    lines.push(clipLine(line, width));
+  });
+
+  lines.push(
+    clipLine(
+      {
+        id: "value_ranking_legend",
+        segments: [
+          {
+            text: "* peak-hour or long-context pricing can cost more · free models and models without a Go limit are left out",
+            role: "value",
+          },
+        ],
+      },
+      width,
+    ),
+  );
   return lines;
 }

@@ -5,11 +5,17 @@
  */
 import { TextAttributes } from "@opentui/core";
 import type { JSX } from "@opentui/solid";
-import { Show } from "solid-js";
+import { Show, createSignal, onCleanup, onMount } from "solid-js";
 import { sanitizeDisplayText } from "../../lib/display-sanitize.js";
 import type { Notice, QuotaRpcNoticeListOutput } from "../../rpc.js";
 import { columnsOf } from "../../view/columns.js";
 import { LineText, type SurfaceHost } from "../sidebar.js";
+import {
+  fetchValueRanking,
+  VALUE_RANKING_REFRESH_MS,
+  valueRankingTableLines,
+  type ValueRanking,
+} from "../value-ranking.js";
 import { limitsLines } from "./limits.js";
 import type { WindowTheme } from "./shell.js";
 
@@ -93,6 +99,67 @@ export function LimitsView(props: {
       {lines().map((line) => (
         <LineText line={line} host={props.host} />
       ))}
+    </Show>
+  );
+}
+
+/**
+ * The Value tab: every paid Go model by blended price over its monthly limit, with the limit
+ * in USD beside it. The list comes from OpenCode's public Go model list, refreshed every 15
+ * minutes while the tab shows; a failed read keeps the last ranking. Nothing is saved.
+ */
+export function ValueView(props: { host: SurfaceHost; nowMs: number; width: number }): JSX.Element {
+  const [ranking, setRanking] = createSignal<ValueRanking>();
+  const [error, setError] = createSignal<string>();
+  let abort: AbortController | undefined;
+  const load = () => {
+    abort?.abort();
+    const controller = new AbortController();
+    abort = controller;
+    fetchValueRanking({ plan: "go", signal: controller.signal, limit: Number.MAX_SAFE_INTEGER })
+      .then((next) => {
+        if (abort === controller) {
+          setRanking(next);
+          setError(undefined);
+        }
+      })
+      .catch((failure) => {
+        if (abort === controller) {
+          const message = failure instanceof Error ? failure.message : String(failure);
+          if (!ranking()) setError(message);
+        }
+      });
+  };
+  onMount(load);
+  const timer = setInterval(load, VALUE_RANKING_REFRESH_MS);
+  onCleanup(() => {
+    clearInterval(timer);
+    abort?.abort();
+  });
+
+  const lines = () => valueRankingTableLines(ranking(), props.width, props.nowMs);
+  return (
+    <Show
+      when={ranking() ?? error() === undefined}
+      fallback={
+        <text fg={props.host.theme().text.muted} wrapMode="word" selectable={false}>
+          {`   Couldn't load the Go model list: ${sanitizeDisplayText(error() ?? "")}`}
+        </text>
+      }
+    >
+      <Show
+        when={ranking()}
+        fallback={<text fg={props.host.theme().text.muted}>{"   Loading best value…"}</text>}
+      >
+        {lines().map((line) => (
+          <LineText line={line} host={props.host} />
+        ))}
+        <Show when={error()}>
+          <text fg={props.host.theme().text.muted} wrapMode="word" selectable={false}>
+            {`   Refresh failed, showing the last ranking: ${sanitizeDisplayText(error() ?? "")}`}
+          </text>
+        </Show>
+      </Show>
     </Show>
   );
 }

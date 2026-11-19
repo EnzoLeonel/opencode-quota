@@ -6,7 +6,9 @@ import {
   VALUE_RANKING_REFRESH_MS,
   VALUE_RANKING_URL,
   valueRankingLines,
+  valueRankingTableLines,
 } from "../src/tui/value-ranking.js";
+import { windowHint } from "../src/tui/window/shell.js";
 import { columnsOf } from "../src/view/columns.js";
 import { lineText } from "../src/view/text.js";
 
@@ -215,5 +217,72 @@ describe("Go value ranking lines", () => {
 
   it("refreshes every 15 minutes", () => {
     expect(VALUE_RANKING_REFRESH_MS).toBe(15 * 60_000);
+  });
+
+  it("keeps every paid model when the Value tab asks for them all", () => {
+    const many = Array.from({ length: 25 }, (_, index) =>
+      model(`model-${index}`, `Model ${index}`, 100, 0.1, 0.5 + index / 10),
+    );
+    const all = parseValueRanking({ data: many }, "go", 1000, Number.MAX_SAFE_INTEGER);
+    expect(all?.models).toHaveLength(25);
+    expect(all?.models[0]?.modelID).toBe("model-0");
+    expect(all?.models.at(-1)?.modelID).toBe("model-24");
+  });
+
+  it("passes the limit through to the fetch", async () => {
+    const many = Array.from({ length: 25 }, (_, index) =>
+      model(`model-${index}`, `Model ${index}`, 100, 0.1, 0.5),
+    );
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response(JSON.stringify({ data: many }))),
+    );
+    try {
+      const all = await fetchValueRanking({ limit: Number.MAX_SAFE_INTEGER });
+      expect(all.models).toHaveLength(25);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+});
+
+describe("Go value ranking table", () => {
+  const ranking = parseValueRanking({ data: MODELS });
+  if (!ranking) throw new Error("fixture must parse");
+
+  it("lists every ranked model with its monthly limit in USD", () => {
+    const lines = valueRankingTableLines(ranking, 80, 1000);
+    expect(lineText(lines[0]!)).toContain("Best value · Go");
+    expect(lineText(lines[1]!)).toContain("limit");
+    expect(lineText(lines[1]!)).toContain("updated just now");
+    // Title + updated + 4 models + legend.
+    expect(lines).toHaveLength(2 + ranking.models.length + 1);
+    expect(lineText(lines[2]!)).toContain("Alpha Model");
+    expect(lineText(lines[2]!)).toContain("v0.20");
+    expect(lineText(lines[2]!)).toContain("$100");
+    expect(lineText(lines.at(-1)!)).toContain("free models");
+    for (const line of lines) expect(columnsOf(lineText(line))).toBeLessThanOrEqual(80);
+  });
+
+  it("dates the updated line and marks variable pricing on the blend", () => {
+    const peak = parseValueRanking(
+      {
+        data: [model("peak", "Peak Model", 100, 0.1, 0.5, 0.01, { multipliers: [{}] })],
+      },
+      "go",
+      1000,
+    );
+    const lines = valueRankingTableLines(peak, 80, 1000 + 16 * 60_000);
+    expect(lineText(lines[1]!)).toContain("updated 16 min ago");
+    expect(lines.some((line) => lineText(line).includes("v0.20*"))).toBe(true);
+  });
+
+  it("writes nothing without a ranking or a width", () => {
+    expect(valueRankingTableLines(undefined, 80)).toEqual([]);
+    expect(valueRankingTableLines(ranking, 0)).toEqual([]);
+  });
+
+  it("hints the Value tab as scroll-only", () => {
+    expect(windowHint("value", false)).toBe("↑↓ scroll · tab next tab · esc close");
   });
 });

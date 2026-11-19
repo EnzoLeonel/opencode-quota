@@ -215,6 +215,13 @@ const plugin = Plugin.define({
               run: () => quotaWindow.open("usage"),
             },
             {
+              id: "quota.value",
+              title: "Quota best value",
+              group: "OpenCode Quota",
+              palette: true,
+              run: () => quotaWindow.open("value"),
+            },
+            {
               id: "quota.status",
               title: "Quota status report",
               group: "OpenCode Quota",
