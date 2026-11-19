@@ -37,7 +37,7 @@ Nest the keys in the file:
 
 ## TUI surfaces
 
-- **Sidebar:** the `Quota` panel in a session's sidebar. Click its title to collapse it to one line per provider (**Collapsed**). The expanded panel also lists **Best value**: the 20 paid OpenCode Go models that cost the least output-token percentage of their monthly limit (output price ÷ limit), with input and cache-read percentages per 1M tokens beside it. It reads the public Go model list every 15 minutes, leaves free models out, and marks with `*` the models whose peak-hour or long-context pricing can raise the base price.
+- **Sidebar:** the `Quota` panel in a session's sidebar. Click its title to collapse it to one line per provider (**Collapsed**). The expanded panel also lists **Best value**: the 20 paid OpenCode Go models with the lowest blended token price over their monthly limit, where the blend is 75% input and 25% output (the LiteLLM "blended" mix) and the limit is the plan's own. It shows that `v` percentage per 1M blended tokens, plus the input, output and cache-read percentages (cache only when the sidebar is wide enough). It reads OpenCode's public Go model list every 15 minutes, leaves out free models (no Go limit) and models without prices, and marks with `*` the models whose peak-hour or long-context pricing can raise the base price. The order is an estimate: your own token mix and each model's token efficiency can move it.
 - **Status line:** under the message box when no sidebar panel with quota is on screen. **Next to the sidebar** on its page shows it there too.
 - **Toasts:** after compaction, when every provider fails, and after a reply once a shown limit is getting low.
 

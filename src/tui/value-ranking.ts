@@ -1,9 +1,10 @@
 /**
  * The sidebar's "Best value" ranking: the paid OpenCode Go models that give the most work per
- * point of the shared monthly allowance, read from the public Go model list. The rank is by
- * output tokens, the dearest token kind: `% of the monthly limit per 1M output tokens`, lower
- * first. Input and cache-read percentages are shown beside it, so a context-heavy workload can
- * compare the same models on the token kind it uses most.
+ * point of the shared monthly allowance, read from the public Go model list. The rank is by the
+ * blended token price normalized by each model's monthly limit: 75% input and 25% output (the
+ * LiteLLM "blended" mix), as `% of the monthly limit per 1M blended tokens`, lower first. The
+ * per-token input, output and cache percentages are shown beside it, so a workload with another
+ * mix can compare the same models on the token kinds it uses most.
  *
  * Nothing here is saved: the fetch is repeated every 15 minutes while the sidebar shows, and a
  * failed read keeps the last ranking in memory.
@@ -29,6 +30,11 @@ export type ValueRankingModel = {
   outputPercent: number;
   /** Percentage points of the monthly limit a 1M-token cache read costs. */
   cachePercent: number;
+  /**
+   * Percentage points of the monthly limit a 1M-token blend costs: 75% input and 25% output,
+   * the LiteLLM "blended" price, over this model's limit. The rank uses it.
+   */
+  blendPercent: number;
   /** Peak-hour or long-context pricing makes the real cost higher than these base prices. */
   variablePricing: boolean;
 };
@@ -92,14 +98,17 @@ function readModel(item: unknown, plan: ValueRankingPlan): ValueRankingModel | u
     inputPercent: (inputPrice / limit) * 100,
     outputPercent: (outputPrice / limit) * 100,
     cachePercent: (cachePrice / limit) * 100,
+    // The LiteLLM blended price: 75% of input and 25% of output, per 1M tokens.
+    blendPercent: ((3 * inputPrice + outputPrice) / 4 / limit) * 100,
     variablePricing,
   };
 }
 
 /**
- * The paid models of `plan`, most output tokens per percentage point first: the public Go model
- * list's `data`, its `go.monthly_usage[plan]` limits and its base token prices. Undefined when
- * the reply is not a model list with at least one priced model.
+ * The paid models of `plan`, lowest blended price over the monthly limit first: the public Go
+ * model list's `data`, its `go.monthly_usage[plan]` limits and its base token prices. Free
+ * models (no limit for the plan) and models without prices are left out. Undefined when the
+ * reply is not a model list with at least one priced model.
  */
 export function parseValueRanking(
   json: unknown,
@@ -118,8 +127,8 @@ export function parseValueRanking(
 
   models.sort(
     (a, b) =>
+      a.blendPercent - b.blendPercent ||
       a.outputPercent - b.outputPercent ||
-      a.inputPercent - b.inputPercent ||
       a.name.localeCompare(b.name),
   );
   return { plan, generatedAtMs: nowMs, models: models.slice(0, VALUE_RANKING_LIMIT) };
@@ -180,29 +189,31 @@ function clipLine(line: Line, width: number): Line {
 }
 
 /**
- * The section's lines: a blank spacer, the header, and one line per ranked model. The output
- * percentage decides the order; input and cache follow. When the sidebar is narrow the cache
- * column gives way first, then the names shorten; the sum stays inside `width`.
+ * The section's lines: a blank spacer, the header, and one line per ranked model. The blended
+ * percentage decides the order; input, output and cache follow. When the sidebar is narrow the
+ * cache column gives way first, then the names shorten; the sum stays inside `width`.
  */
 export function valueRankingLines(ranking: ValueRanking | undefined, width: number): Line[] {
   if (!ranking || ranking.models.length === 0 || width <= 0) return [];
 
   const models = ranking.models;
-  const inputTexts = models.map((model) => formatPercent(model.inputPercent));
-  const outputTexts = models.map(
-    (model) => `${formatPercent(model.outputPercent)}${model.variablePricing ? "*" : ""}`,
+  const blendTexts = models.map(
+    (model) => `${formatPercent(model.blendPercent)}${model.variablePricing ? "*" : ""}`,
   );
+  const inputTexts = models.map((model) => formatPercent(model.inputPercent));
+  const outputTexts = models.map((model) => formatPercent(model.outputPercent));
   const cacheTexts = models.map((model) => formatCachePercent(model.cachePercent));
 
   const valuesFor = (index: number, withCache: boolean): string => {
     const cache = withCache ? ` c${cacheTexts[index]}` : "";
-    return ` i${inputTexts[index]} o${outputTexts[index]}${cache}`;
+    return ` v${blendTexts[index]} i${inputTexts[index]} o${outputTexts[index]}${cache}`;
   };
 
   const withCacheWidth = Math.max(...models.map((_, index) => valuesFor(index, true).length));
-  // The rank is two digits and a space; the rest is the name and the values.
+  // The rank is two digits and a space; the rest is the name and the values. The cache column
+  // only shows when the name keeps enough room to be recognized.
   const roomWithCache = width - 3 - withCacheWidth;
-  const showCache = roomWithCache >= 6;
+  const showCache = roomWithCache >= 10;
   const valuesWidth = showCache
     ? withCacheWidth
     : Math.max(...models.map((_, index) => valuesFor(index, false).length));
@@ -214,7 +225,7 @@ export function valueRankingLines(ranking: ValueRanking | undefined, width: numb
     clipLine(
       {
         id: "value_ranking",
-        segments: [{ text: `${title}  %/1M`, role: "provider", bold: true }],
+        segments: [{ text: `${title}  v %/1M`, role: "provider", bold: true }],
       },
       width,
     ),

@@ -45,7 +45,7 @@ const MODELS = [
 ];
 
 describe("Go value ranking", () => {
-  it("ranks paid models by output percentage of the monthly limit, input second", () => {
+  it("ranks paid models by blended input/output price over the monthly limit", () => {
     const ranking = parseValueRanking({ data: MODELS }, "go", 1000);
 
     expect(ranking).toBeDefined();
@@ -66,13 +66,26 @@ describe("Go value ranking", () => {
     expect(alpha?.inputPercent).toBeCloseTo(0.1);
     expect(alpha?.outputPercent).toBeCloseTo(0.5);
     expect(alpha?.cachePercent).toBeCloseTo(0.1);
-    // Beta ties Alpha on output (0.5) and loses on input (0.25 against 0.1).
-    expect(beta?.inputPercent).toBeCloseTo(0.25);
-    expect(beta?.outputPercent).toBeCloseTo(0.5);
+    // (3 × 0.1 + 0.5) / 4 = 0.2 per 1M, over the $100 limit.
+    expect(alpha?.blendPercent).toBeCloseTo(0.2);
+    // (3 × 0.25 + 0.5) / 4 = 0.3125 per 1M, over the $60 limit.
+    expect(beta?.blendPercent).toBeCloseTo(0.3125);
     // A model without a cache price bills cache reads as input.
     expect(ranking?.models.find((item) => item.modelID === "cacheless")?.cachePercent).toBeCloseTo(
       0.25,
     );
+  });
+
+  it("lets a larger monthly limit beat the same token prices", () => {
+    const models = [
+      model("small", "Small Limit", 30, 0.1, 0.2),
+      model("large", "Large Limit", 60, 0.1, 0.2),
+    ];
+    const ranking = parseValueRanking({ data: models });
+
+    expect(ranking?.models.map((item) => item.modelID)).toEqual(["large", "small"]);
+    expect(ranking?.models[0]?.blendPercent).toBeCloseTo(0.2083, 3);
+    expect(ranking?.models[1]?.blendPercent).toBeCloseTo(0.4167, 3);
   });
 
   it("uses the chosen plan's limits and leaves free models out", () => {
@@ -158,30 +171,41 @@ describe("Go value ranking lines", () => {
     const lines = valueRankingLines(ranking, 36);
     expect(lines[0]).toEqual({ id: "", segments: [] });
     expect(lineText(lines[1]!)).toContain("Best value · Go");
+    expect(lineText(lines[1]!)).toContain("v %/1M");
     expect(lines).toHaveLength(2 + ranking.models.length);
     for (const line of lines) expect(columnsOf(lineText(line))).toBeLessThanOrEqual(36);
     expect(lineText(lines[2]!)).toContain("Alpha Model");
+    expect(lineText(lines[2]!)).toContain("v0.20");
     expect(lineText(lines[2]!)).toContain("i0.10");
     expect(lineText(lines[2]!)).toContain("o0.50");
-    expect(lineText(lines[2]!)).toContain("c0.10");
+    // The cache column needs room for a recognizable name, so it waits for a wider sidebar.
+    expect(lineText(lines[2]!)).not.toContain(" c");
   });
 
-  it("adds * to a model whose real price can rise", () => {
+  it("shows the cache column when the sidebar is wide", () => {
+    const lines = valueRankingLines(ranking, 48);
+    const row = lineText(lines[2]!);
+    expect(row).toContain("v0.20");
+    expect(row).toContain("c0.10");
+    for (const line of lines) expect(columnsOf(lineText(line))).toBeLessThanOrEqual(48);
+  });
+
+  it("adds * to the blend of a model whose real price can rise", () => {
     const peak = parseValueRanking({
       data: [model("peak", "Peak Model", 100, 0.1, 0.5, 0.01, { multipliers: [{}] })],
     });
-    expect(valueRankingLines(peak, 40).some((line) => lineText(line).includes("o0.50*"))).toBe(
+    expect(valueRankingLines(peak, 40).some((line) => lineText(line).includes("v0.20*"))).toBe(
       true,
     );
   });
 
   it("drops the cache column when the sidebar is narrow", () => {
-    const lines = valueRankingLines(ranking, 24);
+    const lines = valueRankingLines(ranking, 26);
     const row = lineText(lines[2]!);
     expect(row).toContain("i0.10");
     expect(row).toContain("o0.50");
     expect(row).not.toContain(" c");
-    for (const line of lines) expect(columnsOf(lineText(line))).toBeLessThanOrEqual(24);
+    for (const line of lines) expect(columnsOf(lineText(line))).toBeLessThanOrEqual(26);
   });
 
   it("writes nothing without a ranking or a width", () => {
