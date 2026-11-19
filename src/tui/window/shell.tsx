@@ -2,7 +2,7 @@
 /**
  * The quota window. `/quota`, `/quota_usage`, `/quota_status` and `/quota_settings` open it
  * above the message box of a session, where it covers the chat
- * with the same size on every tab: Usage, Limits, Plugin and the Settings tabs Layout, Colors
+ * with the same size on every tab: Usage, Limits, Value, Plugin and the Settings tabs Layout, Colors
  * and Providers (`settings.tsx`); Layout has pages, All places and one per place. The tab bar is
  * one line: the window's title and the plugin's version, the tabs, and "esc" at its right end to
  * close the window. When its tabs don't fit, it drops the "Settings" label, then shows the tabs
@@ -32,12 +32,12 @@ import type { Theme } from "../theme.js";
 import { type CopyWithToast, createPluginTab } from "./plugin-tab.js";
 import { isSettingsTab, pagesRoom, SETTINGS_GROUPS, type SettingsEditor } from "./settings.js";
 import { Choice, createUsageTab, USAGE_RAIL_WIDTH, type UsageChoice } from "./usage.js";
-import { LimitsView } from "./views.js";
+import { LimitsView, ValueView } from "./views.js";
 
 /** Columns inside the window until it knows its real width. */
 const DEFAULT_WIDTH = 120;
 
-export type WindowTab = "limits" | "usage" | "system" | SettingsTab;
+export type WindowTab = "limits" | "usage" | "value" | "system" | SettingsTab;
 
 /** A tab whose lines the window's own keys use (`option-line.ts` rules). */
 type TabLines = {
@@ -56,6 +56,7 @@ type BarTab = { title: string; pages: readonly WindowTab[] };
 const TABS: ReadonlyArray<BarTab> = [
   { title: "Usage", pages: ["usage"] },
   { title: "Limits", pages: ["limits"] },
+  { title: "Value", pages: ["value"] },
   { title: "Plugin", pages: ["system"] },
 ];
 /** Every tab in the order the tab bar shows them and tab and shift+tab go through them. */
@@ -77,6 +78,9 @@ export function windowHint(tab: WindowTab | undefined, evenUse: boolean): string
   if (tab === "limits") {
     const mark = evenUse ? "┃ where even use would be · " : "";
     return `${mark}c copy · ↑↓ scroll · ${end}`;
+  }
+  if (tab === "value") {
+    return `↑↓ scroll · ${end}`;
   }
   return `↑↓ select · space/enter or click to use · ‹ › (or ←/→) change · ${end}`;
 }
@@ -623,6 +627,9 @@ export function createQuotaWindow(
               </Show>
               <Show when={tab() === "usage"}>
                 <usage.View width={bodyWidth() - USAGE_RAIL_WIDTH} keyTarget={() => windowBox} />
+              </Show>
+              <Show when={tab() === "value"}>
+                <ValueView host={host} nowMs={nowMs()} width={bodyWidth()} />
               </Show>
               <Show when={settingsTab()}>
                 {(shown: () => SettingsTab) => (

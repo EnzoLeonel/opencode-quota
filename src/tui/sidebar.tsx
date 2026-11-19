@@ -7,12 +7,18 @@
  */
 import type { BoxRenderable } from "@opentui/core";
 import type { JSX } from "@opentui/solid";
-import { createMemo, createSignal, onCleanup, Show } from "solid-js";
+import { createMemo, createSignal, onCleanup, onMount, Show } from "solid-js";
 import type { Surface } from "../view/select.js";
 import { type ColorRole, type Line, type Segment, sidebarPanel } from "../view/text.js";
 import type { QuotaClient } from "./client.js";
 import type { DisplaySettings } from "./display.js";
 import { roleColor, segmentColor, type Theme } from "./theme.js";
+import {
+  fetchValueRanking,
+  VALUE_RANKING_REFRESH_MS,
+  type ValueRanking,
+  valueRankingLines,
+} from "./value-ranking.js";
 
 /** What the quota window's Settings tabs tell the surfaces while you edit them. */
 export type SurfaceEditing = {
@@ -91,15 +97,35 @@ export function SidebarPanel(props: {
   const open = () => host.editing.panelOpen() ?? props.open();
   const [width, setWidth] = createSignal(DEFAULT_SIDEBAR_WIDTH);
   const [nowMs, setNowMs] = createSignal(Date.now());
+  const [valueRanking, setValueRanking] = createSignal<ValueRanking>();
   // Reset times count down between snapshots.
   const clock = setInterval(() => setNowMs(Date.now()), 60_000);
-  onCleanup(() => clearInterval(clock));
+  let rankingAbort: AbortController | undefined;
+  const loadValueRanking = () => {
+    rankingAbort?.abort();
+    const controller = new AbortController();
+    rankingAbort = controller;
+    fetchValueRanking({ plan: "go", signal: controller.signal })
+      .then((ranking) => {
+        if (rankingAbort === controller) setValueRanking(ranking);
+      })
+      .catch(() => undefined);
+  };
+  onMount(loadValueRanking);
+  const rankingTimer = setInterval(loadValueRanking, VALUE_RANKING_REFRESH_MS);
+  onCleanup(() => {
+    clearInterval(clock);
+    clearInterval(rankingTimer);
+    rankingAbort?.abort();
+  });
 
   const display = () => host.display();
   const snapshot = () => host.quota.snapshot(props.sessionID);
   const panel = createMemo(() =>
     sidebarPanel(snapshot(), display(), { nowMs: nowMs(), width: width(), open: open() }),
   );
+  const sectionLines = () => (open() ? valueRankingLines(valueRanking(), width()) : []);
+  const lines = () => [...panel().lines, ...sectionLines()];
   const marked = () => host.editing.marked(open() ? "sidebar" : "collapsed");
 
   return (
@@ -120,7 +146,7 @@ export function SidebarPanel(props: {
           <b>{panel().title}</b>
         </text>
         <Show when={snapshot()} fallback={<text fg={host.theme().text.muted}>Loading quota…</text>}>
-          {panel().lines.map((line) => (
+          {lines().map((line) => (
             <LineText line={line} host={host} marked={line.id !== "" && line.id === marked()} />
           ))}
         </Show>
