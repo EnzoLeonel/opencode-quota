@@ -37,7 +37,7 @@ Nest the keys in the file:
 
 ## TUI surfaces
 
-- **Sidebar:** the `Quota` panel in a session's sidebar. Click its title to collapse it to one line per provider (**Collapsed**).
+- **Sidebar:** the `Quota` panel in a session's sidebar. Click its title to collapse it to one line per provider (**Collapsed**). The expanded panel also lists **Best value**: the 20 paid OpenCode Go models that cost the least output-token percentage of their monthly limit (output price ÷ limit), with input and cache-read percentages per 1M tokens beside it. It reads the public Go model list every 15 minutes, leaves free models out, and marks with `*` the models whose peak-hour or long-context pricing can raise the base price.
 - **Status line:** under the message box when no sidebar panel with quota is on screen. **Next to the sidebar** on its page shows it there too.
 - **Toasts:** after compaction, when every provider fails, and after a reply once a shown limit is getting low.
 
