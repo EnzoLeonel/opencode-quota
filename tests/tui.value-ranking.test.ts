@@ -24,6 +24,7 @@ function model(
   return {
     id,
     name,
+    type: "chat",
     go: { monthly_usage: limit === undefined ? {} : { go: limit, "go-plus": limit * 2 } },
     cost: {
       text: {
@@ -95,6 +96,23 @@ describe("Go value ranking", () => {
     expect(ranking?.plan).toBe("go-plus");
     expect(ranking?.models.find((item) => item.modelID === "alpha")?.monthlyLimitUsd).toBe(200);
     expect(ranking?.models.find((item) => item.modelID === "free")).toBeUndefined();
+  });
+
+  it("leaves out models that /model cannot select", () => {
+    const nonChat = [
+      { ...model("embed", "Embedding Model", 15, 0.01, 0), type: "embedding" },
+      { ...model("decision", "Decision Model", 15, 0.1, 0), type: "decision" },
+      { ...model("image", "Image Model", 15, 0.1, 0), type: "image" },
+      { ...model("untyped", "Untyped Model", 15, 0.1, 0), type: undefined },
+    ];
+    const ranking = parseValueRanking({ data: [...MODELS, ...nonChat] });
+
+    expect(ranking?.models.map((item) => item.modelID)).toEqual([
+      "alpha",
+      "beta",
+      "gamma",
+      "cacheless",
+    ]);
   });
 
   it("marks models whose peak-hour or long-context pricing can raise the base cost", () => {
@@ -260,7 +278,7 @@ describe("Go value ranking table", () => {
     expect(lineText(lines[2]!)).toContain("Alpha Model");
     expect(lineText(lines[2]!)).toContain("v0.20");
     expect(lineText(lines[2]!)).toContain("$100");
-    expect(lineText(lines.at(-1)!)).toContain("free models");
+    expect(lineText(lines.at(-1)!)).toContain("free, non-chat");
     for (const line of lines) expect(columnsOf(lineText(line))).toBeLessThanOrEqual(80);
   });
 

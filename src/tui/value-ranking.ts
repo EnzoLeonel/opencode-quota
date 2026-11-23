@@ -1,10 +1,13 @@
 /**
- * The sidebar's "Best value" ranking: the paid OpenCode Go models that give the most work per
- * point of the shared monthly allowance, read from the public Go model list. The rank is by the
- * blended token price normalized by each model's monthly limit: 75% input and 25% output (the
- * LiteLLM "blended" mix), as `% of the monthly limit per 1M blended tokens`, lower first. The
- * per-token input, output and cache percentages are shown beside it, so a workload with another
- * mix can compare the same models on the token kinds it uses most.
+ * The sidebar's "Best value" ranking: the paid OpenCode Go chat models that give the most work
+ * per point of the shared monthly allowance, read from the public Go model list. The rank is by
+ * the blended token price normalized by each model's monthly limit: 75% input and 25% output
+ * (the LiteLLM "blended" mix), as `% of the monthly limit per 1M blended tokens`, lower first.
+ * The per-token input, output and cache percentages are shown beside it, so a workload with
+ * another mix can compare the same models on the token kinds it uses most.
+ *
+ * Only `type: "chat"` models are ranked: `/model` does not offer the list's embedding or
+ * decision models, even though Go gives them a monthly limit.
  *
  * Nothing here is saved: the fetch is repeated every 15 minutes while the sidebar shows, and a
  * failed read keeps the last ranking in memory.
@@ -73,6 +76,10 @@ function readModel(item: unknown, plan: ValueRankingPlan): ValueRankingModel | u
   const modelID = typeof model?.id === "string" ? model.id.trim() : "";
   if (!modelID) return undefined;
 
+  // `/model` only offers chat models. Embeddings and decision models carry a Go limit and
+  // prices, but the TUI cannot select them, so they do not belong in the ranking.
+  if (model?.type !== "chat") return undefined;
+
   const limit = finiteNumber(asRecord(asRecord(model?.go)?.monthly_usage)?.[plan]);
   if (limit === undefined || limit <= 0) return undefined;
 
@@ -105,10 +112,11 @@ function readModel(item: unknown, plan: ValueRankingPlan): ValueRankingModel | u
 }
 
 /**
- * The paid models of `plan`, lowest blended price over the monthly limit first: the public Go
- * model list's `data`, its `go.monthly_usage[plan]` limits and its base token prices. Free
- * models (no limit for the plan) and models without prices are left out. Undefined when the
- * reply is not a model list with at least one priced model.
+ * The paid chat models of `plan`, lowest blended price over the monthly limit first: the public
+ * Go model list's `data`, its `go.monthly_usage[plan]` limits and its base token prices. Models
+ * the TUI cannot select (`type` other than `chat`, such as embeddings and decisions), free models
+ * (no limit for the plan) and models without prices are left out. Undefined when the reply is not
+ * a model list with at least one priced model.
  */
 export function parseValueRanking(
   json: unknown,
@@ -341,7 +349,7 @@ export function valueRankingTableLines(
         id: "value_ranking_legend",
         segments: [
           {
-            text: "* peak-hour or long-context pricing can cost more · free models and models without a Go limit are left out",
+            text: "* peak-hour or long-context pricing can cost more · free, non-chat and unlimited models are left out",
             role: "value",
           },
         ],
